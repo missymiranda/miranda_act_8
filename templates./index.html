@@ -1,1 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laboratory Activity 8 | Student Database</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;color:#1f2937;background:#f3f6fb}
+header{background:#173b70;color:white;padding:24px 16px;text-align:center}
+header h1{margin:0 0 8px;font-size:25px} header p{margin:0}
+main{max-width:1100px;margin:26px auto;padding:0 16px}
+.panel{background:white;padding:22px;border-radius:12px;box-shadow:0 3px 14px rgba(20,40,80,.08);margin-bottom:20px}
+h2{margin-top:0;color:#173b70}
+p.sub{color:#64748b;margin-top:-5px}
+.form-grid{display:grid;grid-template-columns:repeat(5,minmax(120px,1fr));gap:10px}
+input,button{padding:10px 13px;border-radius:7px;font-size:15px}
+input{border:1px solid #cbd5e1;min-width:0;width:100%;background:#fff}
+button{border:0;color:white;background:#245ca6;cursor:pointer}
+button:hover{background:#173b70}
+button.secondary{background:#64748b}button.danger{background:#b91c1c}button.small{padding:7px 10px;font-size:13px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+#status,#classmateStatus{margin:14px 0 0;color:#475569}
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;margin-top:14px}
+th,td{text-align:left;padding:11px;border-bottom:1px solid #e2e8f0;white-space:nowrap}
+th{background:#eaf1fb;color:#173b70}
+td.action-cell{display:flex;gap:7px}
+.links{display:flex;flex-wrap:wrap;gap:12px}a{color:#245ca6;overflow-wrap:anywhere}
+.badge{display:inline-block;background:#eaf1fb;color:#173b70;border-radius:20px;padding:5px 10px;font-size:12px;font-weight:bold}
+.empty{color:#64748b;text-align:center;padding:18px}
+@media(max-width:800px){.form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:500px){header h1{font-size:21px}.panel{padding:16px}.form-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Student Database System</h1>
+  <p>Laboratory Activity 8: CRUD Web Application and Student API</p>
+</header>
+<main>
+  <section class="panel">
+    <h2>My Records <span class="badge">SQLite Database</span></h2>
+    <p class="sub">Add, view, update, and delete your own student records.</p>
+    <form id="studentForm">
+      <div class="form-grid">
+        <input id="student_id" placeholder="Student ID (e.g. 2024-0001)" required>
+        <input id="name" placeholder="Full Name" required>
+        <input id="program" placeholder="Program (e.g. BSIT)" required>
+        <input id="year" type="number" min="1" max="6" placeholder="Year" required>
+        <input id="section" placeholder="Section (e.g. 3B)" required>
+      </div>
+      <div class="actions">
+        <button id="saveButton" type="submit">Add Student</button>
+        <button class="secondary" type="button" id="cancelEdit" hidden>Cancel Edit</button>
+        <button class="secondary" type="button" id="refreshButton">Refresh Records</button>
+        <button class="secondary" type="button" id="loadSectionButton">Filter Section</button>
+        <input id="filterSection" style="max-width:180px" placeholder="Section to filter">
+      </div>
+    </form>
+    <p id="status" role="status">Loading your records...</p>
 
+    <!-- LIVE SEARCH ADDED -->
+    <div class="actions">
+      <input
+        id="searchStudent"
+        type="text"
+        placeholder="Search by ID, name, program, year, or section..."
+        style="flex:1; min-width:240px"
+      >
+      <button type="button" id="searchButton">Search</button>
+      <button type="button" class="secondary" id="clearSearchButton">Clear Search</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>DB ID</th><th>Student ID</th><th>Name</th><th>Program</th><th>Year</th><th>Section</th><th>Actions</th></tr></thead>
+        <tbody id="studentList"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Classmate's Records <span class="badge">Read-only</span></h2>
+    <p class="sub">Paste your classmate's public Render API URL. Example: https://your-classmate-app.onrender.com/api/students</p>
+    <div class="actions">
+      <input id="classmateUrl" style="flex:1;min-width:240px" type="url" placeholder="https://CLASSMATE-APP.onrender.com/api/students">
+      <button type="button" id="loadClassmateButton">Load Classmate Records</button>
+    </div>
+    <p id="classmateStatus" role="status">Classmate records have not been loaded yet.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>DB ID</th><th>Student ID</th><th>Name</th><th>Program</th><th>Year</th><th>Section</th></tr></thead>
+        <tbody id="classmateList"><tr><td colspan="6" class="empty">Enter a classmate's API URL to view records.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Activity 8 API Endpoints</h2>
+    <div class="links">
+      <a href="/api/students" target="_blank">CRUD API JSON: /api/students</a>
+    </div>
+  </section>
+</main>
+<script>
+const form = document.getElementById('studentForm');
+const statusBox = document.getElementById('status');
+const studentList = document.getElementById('studentList');
+const saveButton = document.getElementById('saveButton');
+const cancelEditButton = document.getElementById('cancelEdit');
+const searchInput = document.getElementById('searchStudent');
+
+let editingId = null;
+let cachedStudents = [];
+
+function showStatus(message){
+  statusBox.textContent = message;
+}
+
+function escapeCell(value){
+  return value ?? '';
+}
+
+function renderMyStudents(students, updateCache = false){
+  if(updateCache){
+    cachedStudents = students;
+  }
+
+  studentList.innerHTML = '';
+
+  if(!students.length){
+    studentList.innerHTML = '<tr><td colspan="7" class="empty">No student records found.</td></tr>';
+    return;
+  }
+
+  students.forEach(student => {
+    const row = document.createElement('tr');
+
+    [student.id, student.student_id, student.name, student.program, student.year, student.section]
+      .forEach(value => {
+        const cell = document.createElement('td');
+        cell.textContent = escapeCell(value);
+        row.appendChild(cell);
+      });
+
+    const actions = document.createElement('td');
+    actions.className = 'action-cell';
+
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'small';
+    edit.textContent = 'Edit';
+    edit.addEventListener('click', () => startEdit(student));
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'small danger';
+    del.textContent = 'Delete';
+    del.addEventListener('click', () => deleteStudent(student.id, student.name));
+
+    actions.append(edit, del);
+    row.appendChild(actions);
+    studentList.appendChild(row);
+  });
+}
+
+async function loadStudents(){
+  showStatus('Loading records...');
+
+  try{
+    const response = await fetch('/api/students');
+    const data = await response.json();
+
+    if(!response.ok) throw new Error(data.error || 'Could not load records.');
+
+    cachedStudents = data;
+    applySearch(false);
+  }catch(error){
+    showStatus('Error: ' + error.message);
+  }
+}
+
+function formData(){
+  return {
+    student_id: document.getElementById('student_id').value.trim(),
+    name: document.getElementById('name').value.trim(),
+    program: document.getElementById('program').value.trim(),
+    year: Number(document.getElementById('year').value),
+    section: document.getElementById('section').value.trim()
+  };
+}
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+
+  const data = formData();
+
+  if(!data.student_id || !data.name || !data.program || !data.section || !data.year){
+    showStatus('Please complete all fields.');
+    return;
+  }
+
+  const url = editingId === null ? '/api/students' : '/api/students/' + editingId;
+  const method = editingId === null ? 'POST' : 'PUT';
+
+  saveButton.disabled = true;
+
+  try{
+    const response = await fetch(url, {
+      method,
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(data)
+    });
+
+    const result = await response.json();
+
+    if(!response.ok) throw new Error(result.error || 'Could not save the record.');
+
+    resetForm();
+    searchInput.value = '';
+    await loadStudents();
+    showStatus(result.message || 'Saved successfully.');
+  }catch(error){
+    showStatus('Error: ' + error.message);
+  }finally{
+    saveButton.disabled = false;
+  }
+});
+
+function startEdit(student){
+  editingId = student.id;
+
+  document.getElementById('student_id').value = student.student_id;
+  document.getElementById('name').value = student.name;
+  document.getElementById('program').value = student.program;
+  document.getElementById('year').value = student.year;
+  document.getElementById('section').value = student.section;
+
+  saveButton.textContent = 'Save Changes';
+  cancelEditButton.hidden = false;
+
+  showStatus('Editing record #' + student.id + '. Change the fields and click Save Changes.');
+  form.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+function resetForm(){
+  editingId = null;
+  form.reset();
+  saveButton.textContent = 'Add Student';
+  cancelEditButton.hidden = true;
+}
+
+cancelEditButton.addEventListener('click', resetForm);
+
+async function deleteStudent(id, name){
+  if(!confirm('Delete the record for "' + name + '"? This cannot be undone.')) return;
+
+  try{
+    const response = await fetch('/api/students/' + id, {method:'DELETE'});
+    const result = await response.json();
+
+    if(!response.ok) throw new Error(result.error || 'Could not delete record.');
+
+    if(editingId === id) resetForm();
+
+    await loadStudents();
+    showStatus('Student deleted successfully.');
+  }catch(error){
+    showStatus('Error: ' + error.message);
+  }
+}
+
+/* LIVE SEARCH: FILTERS IMMEDIATELY WHILE TYPING */
+function applySearch(updateStatus = true){
+  const keyword = searchInput.value.trim().toLowerCase();
+
+  const results = cachedStudents.filter(student =>
+    [
+      student.id,
+      student.student_id,
+      student.name,
+      student.program,
+      student.year,
+      student.section
+    ].some(value =>
+      String(value ?? '').toLowerCase().includes(keyword)
+    )
+  );
+
+  renderMyStudents(results);
+
+  if(updateStatus){
+    if(keyword === ''){
+      showStatus('Displayed ' + results.length + ' student record(s).');
+    }else{
+      showStatus(results.length + ' student record(s) found.');
+    }
+  }
+}
+
+searchInput.addEventListener('input', () => applySearch());
+
+document.getElementById('searchButton').addEventListener('click', () => applySearch());
+
+searchInput.addEventListener('keydown', event => {
+  if(event.key === 'Enter'){
+    event.preventDefault();
+    applySearch();
+  }
+});
+
+document.getElementById('clearSearchButton').addEventListener('click', () => {
+  searchInput.value = '';
+  document.getElementById('filterSection').value = '';
+  applySearch();
+});
+
+/* REFRESH RECORDS */
+document.getElementById('refreshButton').addEventListener('click', () => {
+  searchInput.value = '';
+  document.getElementById('filterSection').value = '';
+  loadStudents();
+});
+
+/* FILTER SECTION */
+document.getElementById('loadSectionButton').addEventListener('click', () => {
+  const section = document.getElementById('filterSection').value.trim().toUpperCase();
+
+  if(!section){
+    applySearch();
+    showStatus('Enter a section to filter.');
+    return;
+  }
+
+  const filtered = cachedStudents.filter(
+    student => String(student.section).toUpperCase() === section
+  );
+
+  renderMyStudents(filtered);
+  showStatus('Showing ' + filtered.length + ' record(s) in section ' + section + '. Click Refresh Records to show all.');
+});
+
+/* CLASSMATE'S RECORDS */
+function renderClassmateStudents(students){
+  const list = document.getElementById('classmateList');
+  list.innerHTML = '';
+
+  if(!students.length){
+    list.innerHTML = '<tr><td colspan="6" class="empty">No classmate records found.</td></tr>';
+    return;
+  }
+
+  students.forEach(student => {
+    const row = document.createElement('tr');
+
+    [student.id, student.student_id, student.name, student.program, student.year, student.section]
+      .forEach(value => {
+        const cell = document.createElement('td');
+        cell.textContent = escapeCell(value);
+        row.appendChild(cell);
+      });
+
+    list.appendChild(row);
+  });
+}
+
+document.getElementById('loadClassmateButton').addEventListener('click', async () => {
+  const url = document.getElementById('classmateUrl').value.trim();
+  const message = document.getElementById('classmateStatus');
+
+  if(!url){
+    message.textContent = 'Paste your classmate’s API URL first.';
+    return;
+  }
+
+  message.textContent = 'Loading classmate records...';
+
+  try{
+    const response = await fetch('/api/classmate-students?url=' + encodeURIComponent(url));
+    const data = await response.json();
+
+    if(!response.ok) throw new Error(data.error || 'Could not load classmate records.');
+
+    renderClassmateStudents(data);
+    message.textContent = 'Displayed ' + data.length + ' classmate record(s). These records are read-only.';
+  }catch(error){
+    message.textContent = 'Error: ' + error.message;
+  }
+});
+
+loadStudents();
+</script>
+</body>
+</html>
